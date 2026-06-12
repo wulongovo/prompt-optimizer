@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>Prompt优化器</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:-apple-system,sans-serif;background:#0f1117;color:#e1e4e8}
+.header{background:linear-gradient(135deg,#1a1f36,#1b3a2d);padding:20px 30px}
+.header h1{font-size:22px;color:#34d399}
+.header p{color:#8b8fa3;font-size:13px}
+.container{max-width:1200px;margin:0 auto;padding:20px}
+.section{background:#1a1f36;border-radius:16px;padding:25px;margin-bottom:20px}
+.section h2{color:#34d399;font-size:18px;margin-bottom:15px}
+label{display:block;color:#8b8fa3;font-size:13px;margin-bottom:5px}
+textarea,input[type=text]{width:100%;background:#0f1117;border:1px solid #2a2d3e;color:#e1e4e8;padding:12px;border-radius:10px;font-size:14px;outline:none;resize:vertical}
+textarea:focus,input:focus{border-color:#34d399}
+.btn{padding:12px 24px;border:none;border-radius:10px;cursor:pointer;font-size:14px;font-weight:600}
+.btn-primary{background:#34d399;color:#0f1117}
+.btn-primary:disabled{background:#2a2d3e;color:#6b7280}
+.btn-secondary{background:#1e2235;color:#34d399;border:1px solid #2a2d3e}
+.test-case{background:#0f1117;border:1px solid #2a2d3e;border-radius:10px;padding:15px;margin-bottom:10px}
+.test-case-header{display:flex;justify-content:space-between;margin-bottom:10px}
+.test-case-header span{color:#34d399;font-weight:600}
+.btn-remove{background:none;border:none;color:#ef4444;cursor:pointer;font-size:18px}
+.row{display:flex;gap:15px}
+.row>*{flex:1}
+.ranking-table{width:100%;border-collapse:collapse;margin-top:15px}
+.ranking-table th,.ranking-table td{padding:12px 15px;text-align:left;border-bottom:1px solid #2a2d3e}
+.ranking-table th{color:#8b8fa3;font-size:12px;text-transform:uppercase}
+.ranking-table tr:first-child td{color:#34d399;font-weight:600}
+.rank-badge{display:inline-block;width:28px;height:28px;border-radius:50%;text-align:center;line-height:28px;font-weight:700;font-size:13px}
+.rank-1{background:#34d399;color:#0f1117}
+.rank-2{background:#6366f1;color:#fff}
+.rank-3{background:#f59e0b;color:#0f1117}
+.chart-container{height:300px;margin-top:20px}
+.best-prompt{background:#0f1117;border:2px solid #34d399;border-radius:12px;padding:20px;margin-top:15px}
+.best-prompt h3{color:#34d399;margin-bottom:10px}
+.best-prompt pre{color:#e1e4e8;white-space:pre-wrap;font-size:13px;line-height:1.6}
+.strategies{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin:15px 0}
+.strategy-card{background:#0f1117;border:1px solid #2a2d3e;border-radius:10px;padding:15px}
+.strategy-card h4{color:#34d399;font-size:13px;margin-bottom:5px}
+.strategy-card p{color:#8b8fa3;font-size:12px}
+.loading{display:inline-block;width:20px;height:20px;border:2px solid #34d399;border-radius:50%;border-top-color:transparent;animation:spin .8s linear infinite;margin-right:8px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<div class="header">
+<h1>⚡ Prompt优化器</h1>
+<p>自动生成、评估、迭代优化Prompt | 6种策略 × LLM-as-Judge</p>
+</div>
+<div class="container">
+<div class="section">
+<h2>📋 任务描述</h2>
+<label>描述你希望LLM完成的任务</label>
+<textarea id="task" rows="3" placeholder="例如：将中文文本翻译成英文，要求翻译自然流畅"></textarea>
+<h2 style="margin-top:20px">🧪 测试用例</h2>
+<div id="test-cases">
+<div class="test-case">
+<div class="test-case-header"><span>用例 1</span><button class="btn-remove" onclick="removeCase(this)">✕</button></div>
+<div class="row"><div><label>输入</label><input type="text" class="tc-input" placeholder="输入文本"></div>
+<div><label>期望输出</label><input type="text" class="tc-expected" placeholder="期望结果"></div></div>
+</div>
+</div>
+<button class="btn btn-secondary" onclick="addCase()" style="margin-top:10px">+ 添加用例</button>
+<div style="margin-top:20px;display:flex;gap:15px;align-items:center">
+<button class="btn btn-primary" id="btn-opt" onclick="runOpt()">🚀 开始优化</button>
+<label style="margin:0">迭代轮数:</label>
+<input type="text" id="max-iter" value="2" style="width:60px;text-align:center">
+</div>
+</div>
+<div class="section">
+<h2>🎯 优化策略</h2>
+<div class="strategies" id="sg"></div>
+</div>
+<div class="section hidden" id="results">
+<h2>📊 优化结果</h2>
+<p id="summary" style="color:#8b8fa3;margin-bottom:15px"></p>
+<div class="chart-container"><canvas id="chart"></canvas></div>
+<table class="ranking-table" id="rt"><thead><tr><th>排名</th><th>策略</th><th>得分</th><th>反馈</th></tr></thead><tbody></tbody></table>
+<div class="best-prompt"><h3>🏆 最优Prompt</h3><p id="bs" style="color:#8b8fa3;font-size:13px;margin-bottom:10px"></p><pre id="bp"></pre>
+<button class="btn btn-secondary" onclick="navigator.clipboard.writeText(bestP);alert('已复制')" style="margin-top:10px">📋 复制</button></div>
+</div>
+<div class="section">
+<h2>📜 优化历史</h2>
+<div id="hl"><p style="color:#8b8fa3">暂无记录</p></div>
+</div>
+</div>
+<script>
+let chart=null,bestP='';
+async function loadStrat(){
+try{const d=(await(await fetch('/strategies')).json()).data;
+document.getElementById('sg').innerHTML=d.map(s=>`<div class="strategy-card"><h4>${s.name}</h4><p>${s.desc}</p><p style="color:#6366f1;font-size:11px;margin-top:5px">最佳: ${s.best_for}</p></div>`).join()}catch(e){}}
+async function loadHist(){
+try{const d=(await(await fetch('/history')).json()).data;
+document.getElementById('hl').innerHTML=d.length?d.reverse().map(h=>`<div style="padding:10px;border-bottom:1px solid #2a2d3e;font-size:13px"><span style="color:#8b8fa3">${h.timestamp}</span> <span style="color:#34d399">${h.best_score}分</span> <span style="color:#6366f1">${h.best_strategy}</span> <span style="color:#8b8fa3;margin-left:10px">${h.task}</span></div>`).join():'<p style="color:#8b8fa3">暂无记录</p>'}catch(e){}}
+function addCase(){const c=document.getElementById('test-cases'),n=c.children.length+1,d=document.createElement('div');
+d.className='test-case';d.innerHTML=`<div class="test-case-header"><span>用例 ${n}</span><button class="btn-remove" onclick="removeCase(this)">✕</button></div>
+<div class="row"><div><label>输入</label><input type="text" class="tc-input" placeholder="输入文本"></div>
+<div><label>期望输出</label><input type="text" class="tc-expected" placeholder="期望结果"></div></div>`;c.appendChild(d)}
+function removeCase(b){if(document.getElementById('test-cases').children.length>1)b.closest('.test-case').remove()}
+async function runOpt(){
+const task=document.getElementById('task').value.trim();if(!task){alert('请输入任务');return}
+const inp=document.querySelectorAll('.tc-input'),exp=document.querySelectorAll('.tc-expected'),tc=[];
+for(let i=0;i<inp.length;i++){const a=inp[i].value.trim(),b=exp[i].value.trim();if(a&&b)tc.push({input:a,expected:b})}
+if(!tc.length){alert('至少一个用例');return}
+const btn=document.getElementById('btn-opt');btn.disabled=true;btn.innerHTML='<span class="loading"></span> 优化中...';
+try{const r=await fetch('/optimize',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({task,test_cases:tc,max_iterations:parseInt(document.getElementById('max-iter').value)||2})});
+const d=(await r.json()).data;showResults(d);loadHist()}catch(e){alert('失败')}finally{btn.disabled=false;btn.innerHTML='🚀 开始优化'}}
+function showResults(d){
+document.getElementById('results').classList.remove('hidden');
+document.getElementById('summary').textContent=`耗时 ${d.elapsed_seconds}秒 | ${d.test_cases}个用例 | ${d.iterations}轮迭代`;
+document.querySelector('#rt tbody').innerHTML=d.ranking.map((r,i)=>`<tr><td><span class="rank-badge rank-${i+1<=3?i+1:''}">${i+1}</span></td><td>${r.name||r.strategy}</td><td>${r.avg_score}/40</td><td style="color:#8b8fa3;font-size:12px">${r.feedback||''}</td></tr>`).join('');
+if(d.best){bestP=d.best.prompt;document.getElementById('bs').textContent=`${d.best.name} | ${d.best.avg_score}/40`;document.getElementById('bp').textContent=d.best.prompt}
+if(chart)chart.destroy();
+chart=new Chart(document.getElementById('chart').getContext('2d'),{type:'bar',data:{labels:d.ranking.map(r=>r.name||r.strategy),
+datasets:[{label:'得分',data:d.ranking.map(r=>r.avg_score),backgroundColor:d.ranking.map((_,i)=>i===0?'#34d399':i===1?'#6366f1':i===2?'#f59e0b':'#2a2d3e'),borderRadius:6}]},
+options:{responsive:true,maintainAspectRatio:false,scales:{y:{max:40,ticks:{color:'#8b8fa3'},grid:{color:'#1e2235'}},x:{ticks:{color:'#8b8fa3'},grid:{display:false}}},plugins:{legend:{display:false}}}});
+document.getElementById('results').scrollIntoView({behavior:'smooth'})}
+loadStrat();loadHist();
+</script>
+</body>
+</html>
